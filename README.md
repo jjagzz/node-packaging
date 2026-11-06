@@ -95,8 +95,7 @@ Pipeline defined in `Jenkinsfile`:
 - Secrets held in Jenkins Credentials (`deploy-token`, `github-pat`), never in code
 
 ### Challenges
-(Write 2-3 real ones, e.g. Node not found by the jenkins user, webhook blocked by the
-Security Group, app killed after the build ended.)
+
 
 ### Screenshots
 ![Pipeline green](screenshots/pipeline-green.png)
