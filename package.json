@@ -1,0 +1,26 @@
+{
+  "name": "node-packaging-demo",
+  "version": "1.0.0",
+  "description": "Express app for practicing packaging",
+  "main": "src/server.js",
+  "directories": {
+    "doc": "doc",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "node --test",
+    "start": "node src/server.js"
+  },
+  "keywords": [],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "src"
+  ]
+}
