@@ -1,6 +1,6 @@
 {
   "name": "node-packaging-demo",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Express app for practicing packaging",
   "main": "src/server.js",
   "directories": {
