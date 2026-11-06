@@ -75,3 +75,29 @@ published it. For that you would use signing (e.g. GPG or npm provenance).
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for the version history.
+
+## CI/CD with Jenkins
+
+Pipeline defined in `Jenkinsfile`:
+
+| Stage | What it does |
+|---|---|
+| Build | `npm ci` |
+| Test | `node --test`, results published as JUnit; pipeline fails on any failed test |
+| Security Audit | `npm audit --omit=dev --audit-level=high` |
+| Package | `npm pack` + SHA256 checksum, archived in Jenkins |
+| Deploy | Installs the `.tgz` into a staging folder and runs it on port 3001 |
+
+### Setup Summary
+- Jenkins on Ubuntu EC2 (Java 21, Node 22), port 8080
+- Plugins: Git, GitHub, Pipeline, Stage View, Credentials Binding, JUnit
+- Trigger: GitHub webhook to `http://<EC2-IP>:8080/github-webhook/`
+- Secrets held in Jenkins Credentials (`deploy-token`, `github-pat`), never in code
+
+### Challenges
+(Write 2-3 real ones, e.g. Node not found by the jenkins user, webhook blocked by the
+Security Group, app killed after the build ended.)
+
+### Screenshots
+![Pipeline green](screenshots/pipeline-green.png)
+![Failed test run](screenshots/pipeline-red.png)
