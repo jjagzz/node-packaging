@@ -9,7 +9,9 @@
   },
   "scripts": {
     "test": "node --test",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "checksum": "./scripts/checksum.sh generate",
+    "verify-checksum": "./scripts/checksum.sh verify"
   },
   "keywords": [],
   "author": "Your Name",
