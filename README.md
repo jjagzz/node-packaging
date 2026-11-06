@@ -9,6 +9,8 @@ npm test                                     # run tests
 npm pack --pack-destination dist             # build the artifact (.tgz)
 npm audit                                    # security audit
 npm version patch|minor|major                # bump version, commit and tag
+npm run checksum            # generate SHA256 checksums for dist/ artifacts
+npm run verify-checksum     # verify them
 npm publish --registry http://localhost:4873 # publish to local Verdaccio
 ```
 
