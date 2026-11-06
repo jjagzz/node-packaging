@@ -1,6 +1,6 @@
 {
   "name": "node-packaging-demo",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Express app for practicing packaging",
   "main": "src/server.js",
   "directories": {
@@ -9,7 +9,9 @@
   },
   "scripts": {
     "test": "node --test",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "checksum": "./scripts/checksum.sh generate",
+    "verify-checksum": "./scripts/checksum.sh verify"
   },
   "keywords": [],
   "author": "Your Name",
