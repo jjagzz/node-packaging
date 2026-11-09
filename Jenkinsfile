@@ -3,25 +3,24 @@ pipeline {
 
     options {
         timestamps()
-        timeout(time: 15, unit: 'MINUTES')
+        timeout(time: 20, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10'))
     }
 
-    // Task 2: build on every GitHub push
-    // (if you can't use webhooks, replace with: pollSCM('H/2 * * * *'))
     triggers {
-        githubPush()
+        githubPush()   // or: pollSCM('H/2 * * * *')
     }
 
     environment {
-        APP_NAME     = 'node-packaging-demo'
-        DEPLOY_DIR   = '/var/lib/jenkins/staging'
-        STAGING_PORT = '3001'
+        APP_NAME      = 'node-packaging-demo'
+        REGISTRY_USER = 'jjagzz'      // <-- change this
+        IMAGE_NAME    = "${REGISTRY_USER}/${APP_NAME}"
+        CONTAINER     = 'node-staging'
+        STAGING_PORT  = '3001'
     }
 
     stages {
 
-        // Task 4: Build - install exact dependencies from the lock file
         stage('Build') {
             steps {
                 sh 'node -v && npm -v'
@@ -29,7 +28,6 @@ pipeline {
             }
         }
 
-        // Task 5: Test - a failing test returns non-zero, so the pipeline stops
         stage('Test') {
             steps {
                 sh '''
@@ -39,20 +37,16 @@ pipeline {
                 '''
             }
             post {
-                always {
-                    junit 'test-results.xml'
-                }
+                always { junit 'test-results.xml' }
             }
         }
 
-        // Security: fail on high or critical vulnerabilities in production dependencies
         stage('Security Audit') {
             steps {
                 sh 'npm audit --omit=dev --audit-level=high'
             }
         }
 
-        // Task 6a: Package the artifact and checksum it
         stage('Package') {
             steps {
                 sh '''
@@ -66,40 +60,68 @@ pipeline {
             }
         }
 
-        // Task 6b + 7: Deploy to a simulated staging environment
+        // NEW: build the container image from the Dockerfile
+        stage('Docker Build') {
+            steps {
+                sh '''
+                    docker build -t "$IMAGE_NAME:$BUILD_NUMBER" -t "$IMAGE_NAME:latest" .
+                    docker images "$IMAGE_NAME"
+                '''
+            }
+        }
+
+        // NEW: push the image to Docker Hub using Jenkins credentials
+        stage('Docker Push') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds',
+                                                  usernameVariable: 'DOCKER_USER',
+                                                  passwordVariable: 'DOCKER_PASS')]) {
+                    sh '''
+                        trap 'docker logout' EXIT
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        docker push "$IMAGE_NAME:$BUILD_NUMBER"
+                        docker push "$IMAGE_NAME:latest"
+                    '''
+                }
+            }
+        }
+
+        // UPDATED: pull the pushed image and run it as a container
         stage('Deploy') {
             steps {
-                // Demo of credential masking: Jenkins prints **** instead of the value
                 withCredentials([string(credentialsId: 'deploy-token', variable: 'DEPLOY_TOKEN')]) {
-                    sh 'echo "Authenticating with token: $DEPLOY_TOKEN"'
+                    sh 'echo "Authenticating with token: $DEPLOY_TOKEN"'   // masked as ****
                 }
                 sh '''
-                    # Stop the previous staging instance, if any
-                    if [ -f "$DEPLOY_DIR/app.pid" ]; then
-                        kill "$(cat "$DEPLOY_DIR/app.pid")" 2>/dev/null || true
-                        sleep 1
+                    docker pull "$IMAGE_NAME:$BUILD_NUMBER"
+                    docker rm -f "$CONTAINER" 2>/dev/null || true
+
+                    docker run -d --name "$CONTAINER" --restart unless-stopped \
+                      -p "$STAGING_PORT:3000" \
+                      -e APP_ENV=staging -e PORT=3000 \
+                      -v "$WORKSPACE/config:/app/config:ro" \
+                      "$IMAGE_NAME:$BUILD_NUMBER"
+
+                    # Wait up to 60s for Docker's HEALTHCHECK to report healthy
+                    for i in $(seq 1 12); do
+                        status=$(docker inspect --format '{{.State.Health.Status}}' "$CONTAINER")
+                        echo "Health: $status"
+                        [ "$status" = "healthy" ] && break
+                        sleep 5
+                    done
+                    if [ "$status" != "healthy" ]; then
+                        docker logs "$CONTAINER"
+                        exit 1
                     fi
 
-                    # Fresh install of the packaged artifact (not the source tree)
-                    rm -rf "$DEPLOY_DIR" && mkdir -p "$DEPLOY_DIR"
-                    cp -r config "$DEPLOY_DIR/config"
-                    cd "$DEPLOY_DIR"
-                    npm init -y > /dev/null
-                    npm install "$WORKSPACE"/dist/${APP_NAME}-*.tgz
-
-                    # JENKINS_NODE_COOKIE stops Jenkins killing the app when the build ends
-                    APP_ENV=staging APP_CONFIG_DIR="$DEPLOY_DIR/config" JENKINS_NODE_COOKIE=dontKillMe \
-                      nohup node node_modules/${APP_NAME}/src/server.js > app.log 2>&1 &
-                    echo $! > app.pid
-
-                    sleep 3
-                    curl -f http://localhost:${STAGING_PORT}/health
+                    curl -f "http://localhost:$STAGING_PORT/"
                 '''
             }
         }
     }
 
     post {
+        always  { sh 'docker image prune -f || true' }   // free disk space
         success { echo 'Pipeline finished successfully.' }
         failure { echo 'Pipeline failed. Check the failing stage log.' }
     }
