@@ -7,6 +7,6 @@ test('health endpoint returns healthy', async () => {
   const { port } = server.address();
   const res = await fetch(`http://localhost:${port}/health`);
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { status: 'nope' });
+  assert.deepEqual(await res.json(), { status: 'healthy' });
   server.close();
 });
