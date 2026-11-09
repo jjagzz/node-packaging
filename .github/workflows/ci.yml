@@ -1,0 +1,160 @@
+name: CI
+
+# Task 2: triggers
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:          # adds a manual "Run workflow" button
+
+# Least privilege: jobs can only read the repo
+permissions:
+  contents: read
+
+# Cancel older runs of the same branch when a new commit arrives
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  APP_NAME: node-packaging-demo
+
+jobs:
+  # ---------------------------------------------------------------
+  # Job 1: build and test on two Node versions
+  # ---------------------------------------------------------------
+  build-test:
+    name: Build & Test (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest            # Task 3: GitHub-hosted Linux runner
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false                # let both versions finish even if one fails
+      matrix:
+        node-version: [20, 22]
+
+    steps:
+      # Task 4: get the code onto the runner
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      # Task 5: install Node and cache npm downloads (Task 7: caching)
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm                  # cache key comes from package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Task 6: tests. Any failure makes the step, job and workflow fail.
+      - name: Run unit tests
+        run: >
+          node --test
+          --test-reporter=spec --test-reporter-destination=stdout
+          --test-reporter=junit --test-reporter-destination=test-results.xml
+
+      - name: Upload test results
+        if: always()                  # upload even when tests fail, for debugging
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-node-${{ matrix.node-version }}
+          path: test-results.xml
+
+      # Security: fail on high or critical vulnerabilities (run once, on Node 22)
+      - name: Dependency security audit
+        if: matrix.node-version == 22
+        run: npm audit --omit=dev --audit-level=high
+
+  # ---------------------------------------------------------------
+  # Job 2: build the distributable artifact
+  # ---------------------------------------------------------------
+  package:
+    name: Package artifact
+    needs: build-test                 # only runs if every test job passed
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build package and checksum
+        run: |
+          mkdir dist
+          npm pack --pack-destination dist
+          cd dist
+          sha256sum *.tgz > checksum.sha256
+          sha256sum -c checksum.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-package
+          path: dist/
+          retention-days: 14
+
+  # ---------------------------------------------------------------
+  # Job 3: Docker image (built on every run, pushed only from main)
+  # ---------------------------------------------------------------
+  docker:
+    name: Docker build & push
+    needs: build-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build and load locally so we can test it. The GitHub Actions cache
+      # (type=gha) reuses unchanged Docker layers between runs.
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ${{ env.APP_NAME }}:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the container
+        run: |
+          docker run -d --name smoke -p 3000:3000 "$APP_NAME:ci"
+          for i in $(seq 1 12); do
+            curl -sf http://localhost:3000/health && break
+            sleep 5
+          done
+          curl -f http://localhost:3000/health
+          docker exec smoke whoami          # should print: node
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs smoke
+
+      # Task 7: encrypted secrets. Only used on pushes to main, never on PRs,
+      # because pull requests from forks do not receive secrets.
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.APP_NAME }}:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.APP_NAME }}:latest
+          cache-from: type=gha
