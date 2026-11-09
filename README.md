@@ -100,3 +100,24 @@ Pipeline defined in `Jenkinsfile`:
 ### Screenshots
 ![Pipeline green](screenshots/pipeline-green.png)
 ![Failed test run](screenshots/pipeline-red.png)
+
+## Docker Integration
+
+The app is containerized with a `Dockerfile` (node:22-alpine, non-root user,
+HEALTHCHECK on `/health`). Environment config is mounted at runtime, not baked in.
+
+Pipeline stages added:
+
+| Stage | What it does |
+|---|---|
+| Docker Build | `docker build`, tagged `<build number>` and `latest` |
+| Docker Push | Pushes to Docker Hub using the `dockerhub-creds` Jenkins credential |
+| Deploy | Pulls the image, runs it as `node-staging` on port 3001, waits for `healthy` |
+
+Run it manually:
+```bash
+docker build -t node-packaging-demo .
+docker run -d -p 3001:3000 -e APP_ENV=staging node-packaging-demo
+```
+
+Registry: https://hub.docker.com/r/jjagzz/node-packaging-demo
